@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { once } from 'node:events';
 import { createMcpHttpServer } from '../src/http.mjs';
-import { handleMcpMessage } from '../src/mcp.mjs';
+import {
+  handleMcpMessage,
+  MODERN_PROTOCOL_VERSION,
+} from '../src/protocol.mjs';
+
+const PROTOCOL_VERSION_META = 'io.modelcontextprotocol/protocolVersion';
 
 async function withServer(options, fn) {
   const server = createMcpHttpServer(options);
@@ -17,7 +22,14 @@ async function withServer(options, fn) {
   }
 }
 
-test('HTTP MCP endpoint handles initialize and notifications', async () => {
+function modernMeta() {
+  return {
+    [PROTOCOL_VERSION_META]: MODERN_PROTOCOL_VERSION,
+    'io.modelcontextprotocol/clientCapabilities': {},
+  };
+}
+
+test('HTTP MCP endpoint handles legacy initialize and notifications', async () => {
   await withServer(
     {
       client: {},
@@ -52,6 +64,86 @@ test('HTTP MCP endpoint handles initialize and notifications', async () => {
   );
 });
 
+test('HTTP MCP endpoint serves modern server/discover', async () => {
+  await withServer(
+    {
+      client: {},
+      handleMessage: handleMcpMessage,
+      inboundBearerToken: undefined,
+    },
+    async (base) => {
+      const response = await fetch(`${base}/mcp`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'mcp-protocol-version': MODERN_PROTOCOL_VERSION,
+          'mcp-method': 'server/discover',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'discover',
+          method: 'server/discover',
+          params: { _meta: modernMeta() },
+        }),
+      });
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('mcp-protocol-version'), MODERN_PROTOCOL_VERSION);
+      const body = await response.json();
+      assert.equal(body.result.resultType, 'complete');
+      assert.deepEqual(body.result.supportedVersions, [MODERN_PROTOCOL_VERSION]);
+    },
+  );
+});
+
+test('HTTP MCP endpoint returns 400 for modern routing header mismatch', async () => {
+  await withServer(
+    {
+      client: {},
+      handleMessage: handleMcpMessage,
+      inboundBearerToken: undefined,
+    },
+    async (base) => {
+      const response = await fetch(`${base}/mcp`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'mcp-protocol-version': MODERN_PROTOCOL_VERSION,
+          'mcp-method': 'tools/list',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'server/discover',
+          params: { _meta: modernMeta() },
+        }),
+      });
+
+      assert.equal(response.status, 400);
+      const body = await response.json();
+      assert.equal(body.error.code, -32020);
+    },
+  );
+});
+
+test('HTTP MCP endpoint rejects non-JSON content type', async () => {
+  await withServer(
+    {
+      client: {},
+      handleMessage: handleMcpMessage,
+      inboundBearerToken: undefined,
+    },
+    async (base) => {
+      const response = await fetch(`${base}/mcp`, {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain' },
+        body: '{}',
+      });
+      assert.equal(response.status, 415);
+    },
+  );
+});
+
 test('optional inbound bearer token fails closed', async () => {
   await withServer(
     {
@@ -62,6 +154,7 @@ test('optional inbound bearer token fails closed', async () => {
     async (base) => {
       const denied = await fetch(`${base}/mcp`, {
         method: 'POST',
+        headers: { 'content-type': 'application/json' },
         body: '{}',
       });
       assert.equal(denied.status, 401);
