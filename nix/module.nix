@@ -17,21 +17,19 @@ in
 
     forgejoBaseUrl = lib.mkOption {
       type = lib.types.str;
-      example = "https://git.starintel.actor";
-      description = "Base URL of the Forgejo instance.";
+      example = "http://127.0.0.1:3000";
+      description = "Base URL of the Forgejo instance. Prefer a private/internal URL when deployed beside Forgejo.";
     };
 
     tokenFile = lib.mkOption {
       type = lib.types.str;
-      example = "/var/lib/starintel/secrets/forgejo-chatgpt-token";
-      description = "Runtime filesystem path to a read-only Forgejo access token. Keep this a string so the secret is not imported into the Nix store.";
+      description = "Runtime path to the Forgejo access token. Repository write permission is required for mutation tools.";
     };
 
     inboundBearerTokenFile = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
-      example = "/var/lib/starintel/secrets/forgejo-chatgpt-mcp-bearer";
-      description = "Optional runtime filesystem path to a bearer token required by the MCP HTTP endpoint. Keep this a string so the secret is not imported into the Nix store.";
+      description = "Optional runtime bearer token required by the MCP HTTP endpoint.";
     };
 
     listenAddress = lib.mkOption {
@@ -64,14 +62,6 @@ in
       {
         assertion = cfg.forgejoBaseUrl != "";
         message = "services.forgejo-chatgpt-plugin.forgejoBaseUrl must not be empty";
-      }
-      {
-        assertion = lib.hasPrefix "/" cfg.tokenFile;
-        message = "services.forgejo-chatgpt-plugin.tokenFile must be an absolute runtime path";
-      }
-      {
-        assertion = cfg.inboundBearerTokenFile == null || lib.hasPrefix "/" cfg.inboundBearerTokenFile;
-        message = "services.forgejo-chatgpt-plugin.inboundBearerTokenFile must be an absolute runtime path";
       }
     ];
 
