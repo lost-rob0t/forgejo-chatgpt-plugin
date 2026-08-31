@@ -48,6 +48,8 @@ Open a **new normal chat**. Do not enter Work mode.
 
 Select the draft app from the tools/apps menu for the message, or mention the app if the UI offers app mentions.
 
+ChatGPT may require an explicit confirmation before executing write/destructive tools. That is expected; Developer Mode enables those tools but does not mean every mutation is silently executed.
+
 Read smoke tests:
 
 ```
