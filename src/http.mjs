@@ -76,8 +76,8 @@ function bodyProtocolVersion(message) {
 
 function modernRequest(message, context) {
   return (
-    context.protocolVersion === MODERN_PROTOCOL_VERSION ||
-    bodyProtocolVersion(message) === MODERN_PROTOCOL_VERSION
+    bodyProtocolVersion(message) !== undefined ||
+    context.protocolVersion === MODERN_PROTOCOL_VERSION
   );
 }
 
