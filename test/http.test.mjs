@@ -22,9 +22,9 @@ async function withServer(options, fn) {
   }
 }
 
-function modernMeta() {
+function modernMeta(protocolVersion = MODERN_PROTOCOL_VERSION) {
   return {
-    [PROTOCOL_VERSION_META]: MODERN_PROTOCOL_VERSION,
+    [PROTOCOL_VERSION_META]: protocolVersion,
     'io.modelcontextprotocol/clientCapabilities': {},
   };
 }
@@ -122,6 +122,37 @@ test('HTTP MCP endpoint returns 400 for modern routing header mismatch', async (
       assert.equal(response.status, 400);
       const body = await response.json();
       assert.equal(body.error.code, -32020);
+    },
+  );
+});
+
+test('HTTP MCP endpoint returns 400 for unsupported modern version', async () => {
+  await withServer(
+    {
+      client: {},
+      handleMessage: handleMcpMessage,
+      inboundBearerToken: undefined,
+    },
+    async (base) => {
+      const future = '2099-01-01';
+      const response = await fetch(`${base}/mcp`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'mcp-protocol-version': future,
+          'mcp-method': 'server/discover',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'future',
+          method: 'server/discover',
+          params: { _meta: modernMeta(future) },
+        }),
+      });
+
+      assert.equal(response.status, 400);
+      const body = await response.json();
+      assert.equal(body.error.code, -32022);
     },
   );
 });
