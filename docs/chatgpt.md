@@ -1,110 +1,110 @@
 # ChatGPT Developer Mode test flow
 
-This server is designed to be used as a custom MCP app from an ordinary ChatGPT conversation. It does not require Work mode.
+This server is intended to be used as a custom MCP app from an ordinary ChatGPT conversation. It does not require Work mode.
 
-## 1. Deploy a remote MCP endpoint
+## 1. Make the MCP endpoint reachable by ChatGPT
 
-ChatGPT does not connect directly to a localhost-only MCP endpoint. Deploy the service behind HTTPS or use OpenAI's Secure MCP Tunnel for a server on a private network.
+ChatGPT must be able to reach the MCP HTTPS endpoint. The application itself can remain bound to a private/local listener behind the authentication/TLS boundary used for the deployment.
 
-The MCP URL is:
+The MCP URL ends in:
 
-```
-https://<host>/mcp
-```
-
-The health check is:
-
-```
-https://<host>/healthz
+```text
+/mcp
 ```
 
-For the StarIntel deployment the intended endpoint is:
+The health endpoint is:
 
-```
-https://mcp.git.starintel.actor/mcp
+```text
+/healthz
 ```
 
-Keep the application itself bound to `127.0.0.1:9473` when a local reverse proxy or tunnel terminates the external connection.
+Do not expose an unauthenticated write-capable MCP endpoint to the public Internet.
 
 ## 2. Create the custom app
 
-The exact UI is account/workspace dependent and may change while Developer Mode is in beta.
+The exact UI may change while Developer Mode is evolving.
 
 1. Enable **Developer mode** in ChatGPT's Apps advanced settings.
-2. Open **Settings -> Apps -> Create** (or the matching Apps creation screen).
-3. Name the app `StarIntel Forgejo` or similar.
-4. Set the MCP endpoint to the tunneled endpoint or `https://mcp.git.starintel.actor/mcp`.
-5. Choose the authentication mode appropriate for the deployment.
+2. Open the Apps creation screen.
+3. Name the app `Forgejo` or another clear name.
+4. Set its MCP endpoint to the deployed `/mcp` URL.
+5. Select the authentication mode used by that endpoint.
 6. Select **Scan Tools**.
-7. Verify the scan finds 29 `forgejo_*` tools, including mutation tools such as `forgejo_commit_changes`, `forgejo_create_issue`, and `forgejo_create_pull_request`.
-8. Verify delete/merge tools are shown as destructive/write operations if the UI surfaces MCP annotations.
-9. Create/save the draft app.
-
-If the MCP endpoint is private, use Secure MCP Tunnel rather than exposing an unauthenticated write-capable MCP server publicly.
+7. Verify the scan finds **39 unique `forgejo_*` tools**.
+8. Verify write tools such as `forgejo_commit_changes`, `forgejo_create_issue`, and `forgejo_create_pull_request` are present.
+9. Verify merge/file-delete/branch-delete are marked destructive if the UI exposes MCP annotations.
+10. Save the app.
 
 ## 3. Test in normal Chat mode
 
 Open a **new normal chat**. Do not enter Work mode.
 
-Select the draft app from the tools/apps menu for the message, or mention the app if the UI offers app mentions.
+Select the Forgejo app from the tools/apps menu for the message, or mention the app if the UI offers app mentions.
 
-ChatGPT may require an explicit confirmation before executing write/destructive tools. That is expected; Developer Mode enables those tools but does not mean every mutation is silently executed.
+ChatGPT may require confirmation before executing mutation/destructive tools.
 
 Read smoke tests:
 
-```
-Use StarIntel Forgejo and tell me which Forgejo version it is connected to.
-```
-
-```
-Use StarIntel Forgejo and list the repositories you can see.
+```text
+Use Forgejo and tell me which Forgejo version it is connected to.
 ```
 
+```text
+Use Forgejo and list the repositories you can see.
 ```
-Use StarIntel Forgejo to inspect lost-rob0t/prolog-rlm and show me its open pull requests.
+
+```text
+Use Forgejo to inspect OWNER/REPO and show me its open pull requests, the latest PR comments/reviews, and the current combined status of the PR head.
 ```
 
 ## 4. Prove writes work from Chat mode
 
 Use a disposable/test repository for the first mutation test.
 
-First ask ChatGPT to create a branch:
+Create a branch:
 
-```
-Use StarIntel Forgejo to create branch chatgpt-mcp-smoke from main in OWNER/TEST-REPO.
-```
-
-Then create a file on that branch:
-
-```
-Use StarIntel Forgejo to create mcp-smoke.txt on branch chatgpt-mcp-smoke in OWNER/TEST-REPO with the text "ChatGPT Forgejo write path works" and commit message "test: prove ChatGPT MCP writes".
+```text
+Use Forgejo to create branch chatgpt-mcp-smoke from main in OWNER/TEST-REPO.
 ```
 
-Then make ChatGPT read it back:
+Make an atomic commit with `forgejo_commit_changes`:
 
-```
-Use StarIntel Forgejo to read mcp-smoke.txt from chatgpt-mcp-smoke in OWNER/TEST-REPO and show me the content and SHA.
-```
-
-Then update it using the SHA returned by the read call:
-
-```
-Use StarIntel Forgejo to update mcp-smoke.txt on chatgpt-mcp-smoke to add a second line "update works too" and commit it.
+```text
+Use Forgejo to commit two files to chatgpt-mcp-smoke in OWNER/TEST-REPO in one commit:
+- mcp-smoke.txt containing "ChatGPT Forgejo write path works"
+- mcp-smoke-2.txt containing "atomic multi-file commit works"
+Use commit message "test: prove ChatGPT MCP writes".
 ```
 
-Then open a pull request:
+Read both files back and inspect their SHAs:
 
+```text
+Use Forgejo to read both smoke files from chatgpt-mcp-smoke and show me their contents and SHAs.
 ```
-Use StarIntel Forgejo to open a pull request from chatgpt-mcp-smoke into main titled "test: ChatGPT MCP write smoke test".
+
+Open a pull request:
+
+```text
+Use Forgejo to open a pull request from chatgpt-mcp-smoke into main titled "test: ChatGPT MCP write smoke test".
 ```
 
-Do not use the merge tool for the first smoke test unless you intentionally want to merge the test PR. `forgejo_merge_pull_request`, `forgejo_delete_file`, and `forgejo_delete_branch` are marked destructive.
+Exercise collaboration reads:
 
-For a multi-file coding test, ask ChatGPT to use `forgejo_commit_changes`; it can create/update/delete up to 100 files in one commit and can create a new feature branch at the same time.
+```text
+Use Forgejo to read the PR conversation, submitted reviews, inline review comments, commits, and commit statuses for that pull request.
+```
+
+Exercise issue/label mutation in the disposable repo:
+
+```text
+Use Forgejo to list the available repository labels, create a test issue, set one valid label on it, and add a comment saying "ChatGPT issue write path works".
+```
+
+Do not use `forgejo_merge_pull_request`, `forgejo_delete_file`, or `forgejo_delete_branch` in the smoke test unless you intentionally want those destructive actions.
 
 ## 5. Tool surface
 
-### Read
+### Read (22)
 
 - `forgejo_ping`
 - `forgejo_list_repositories`
@@ -114,36 +114,113 @@ For a multi-file coding test, ask ChatGPT to use `forgejo_commit_changes`; it ca
 - `forgejo_get_tree`
 - `forgejo_read_file`
 - `forgejo_search_code`
+- `forgejo_list_labels`
 - `forgejo_list_issues`
 - `forgejo_get_issue`
+- `forgejo_list_issue_comments`
 - `forgejo_list_pull_requests`
 - `forgejo_get_pull_request`
 - `forgejo_get_pull_request_files`
 - `forgejo_get_pull_request_diff`
+- `forgejo_list_pull_request_comments`
+- `forgejo_list_pull_request_reviews`
+- `forgejo_get_pull_request_review_comments`
+- `forgejo_get_pull_request_commits`
+- `forgejo_get_combined_status`
+- `forgejo_list_commit_statuses`
 
-### Write
+### Write (17)
 
 - `forgejo_create_branch`
-- `forgejo_delete_branch` (destructive)
+- `forgejo_delete_branch` **destructive**
 - `forgejo_create_file`
 - `forgejo_update_file`
-- `forgejo_delete_file` (destructive)
+- `forgejo_delete_file` **destructive**
 - `forgejo_commit_changes`
 - `forgejo_create_issue`
 - `forgejo_edit_issue`
 - `forgejo_comment_issue`
+- `forgejo_replace_issue_labels`
 - `forgejo_create_pull_request`
 - `forgejo_edit_pull_request`
 - `forgejo_comment_pull_request`
+- `forgejo_replace_pull_request_labels`
 - `forgejo_request_pull_request_reviewers`
 - `forgejo_review_pull_request`
-- `forgejo_merge_pull_request` (destructive)
+- `forgejo_merge_pull_request` **destructive**
 
-The Forgejo token decides which of these operations actually succeed. For the intended coding workflow, give the dedicated account repository write permissions but not instance-admin privileges.
+The Forgejo account/token decides which operations actually succeed.
 
-## 6. Local MCP protocol smoke test
+## 6. Modern MCP protocol smoke test
 
-With the service running locally:
+The preferred direct protocol test uses MCP `2026-07-28`.
+
+### Discovery
+
+```sh
+curl -sS http://127.0.0.1:9473/mcp \
+  -H 'content-type: application/json' \
+  -H 'MCP-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: server/discover' \
+  --data '{
+    "jsonrpc":"2.0",
+    "id":"discover",
+    "method":"server/discover",
+    "params":{"_meta":{
+      "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities":{}
+    }}
+  }'
+```
+
+### List tools
+
+```sh
+curl -sS http://127.0.0.1:9473/mcp \
+  -H 'content-type: application/json' \
+  -H 'MCP-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: tools/list' \
+  --data '{
+    "jsonrpc":"2.0",
+    "id":"tools",
+    "method":"tools/list",
+    "params":{"_meta":{
+      "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities":{}
+    }}
+  }'
+```
+
+### Call a tool
+
+A modern `tools/call` request must include `Mcp-Name` matching `params.name`:
+
+```sh
+curl -sS http://127.0.0.1:9473/mcp \
+  -H 'content-type: application/json' \
+  -H 'MCP-Protocol-Version: 2026-07-28' \
+  -H 'Mcp-Method: tools/call' \
+  -H 'Mcp-Name: forgejo_ping' \
+  --data '{
+    "jsonrpc":"2.0",
+    "id":"ping",
+    "method":"tools/call",
+    "params":{
+      "name":"forgejo_ping",
+      "arguments":{},
+      "_meta":{
+        "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+        "io.modelcontextprotocol/clientCapabilities":{}
+      }
+    }
+  }'
+```
+
+If inbound bearer authentication is configured, add `Authorization: Bearer ...` to these requests.
+
+## 7. Legacy compatibility
+
+Handshake-era MCP remains supported for compatible clients:
 
 ```sh
 curl -sS http://127.0.0.1:9473/mcp \
@@ -151,15 +228,4 @@ curl -sS http://127.0.0.1:9473/mcp \
   --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"curl-smoke","version":"1"}}}'
 ```
 
-Then inspect tools:
-
-```sh
-curl -sS http://127.0.0.1:9473/mcp \
-  -H 'content-type: application/json' \
-  -H 'mcp-protocol-version: 2025-11-25' \
-  --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
-```
-
-A direct local write test against a disposable repository can call `tools/call` with `forgejo_create_branch` or `forgejo_create_issue` before connecting ChatGPT.
-
-If `MCP_BEARER_TOKEN_FILE` is configured, add `Authorization: Bearer ...` to local smoke-test requests.
+The modern path should be used when testing current ChatGPT tool discovery.
