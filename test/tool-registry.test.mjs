@@ -24,6 +24,17 @@ test('composed ChatGPT tool registry is unique and complete', () => {
   assert.deepEqual(destructive, [...EXPECTED_DESTRUCTIVE].sort());
 });
 
+test('every advertised tool declares the structured result envelope', () => {
+  for (const tool of TOOLS) {
+    assert.deepEqual(tool.outputSchema, {
+      type: 'object',
+      properties: { data: {} },
+      required: ['data'],
+      additionalProperties: false,
+    });
+  }
+});
+
 test('coding and collaboration tools required by ChatGPT are present', () => {
   const byName = new Map(TOOLS.map((tool) => [tool.name, tool]));
 
