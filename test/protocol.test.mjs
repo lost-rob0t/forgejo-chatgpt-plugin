@@ -7,12 +7,13 @@ import {
 } from '../src/protocol.mjs';
 
 const PROTOCOL_VERSION_META = 'io.modelcontextprotocol/protocolVersion';
+const CLIENT_INFO_META = 'io.modelcontextprotocol/clientInfo';
 const SERVER_INFO_META = 'io.modelcontextprotocol/serverInfo';
 
 function meta() {
   return {
     [PROTOCOL_VERSION_META]: MODERN_PROTOCOL_VERSION,
-    'io.modelcontextprotocol/clientInfo': {
+    [CLIENT_INFO_META]: {
       name: 'protocol-test',
       version: '1.0.0',
     },
@@ -20,9 +21,9 @@ function meta() {
   };
 }
 
-function context(method, name) {
+function context(method, name, protocolVersion = MODERN_PROTOCOL_VERSION) {
   return {
-    protocolVersion: MODERN_PROTOCOL_VERSION,
+    protocolVersion,
     methodHeader: method,
     nameHeader: name,
   };
@@ -81,6 +82,49 @@ test('modern request rejects missing protocol HTTP header', async () => {
 
   assert.equal(response.error.code, -32602);
   assert.match(response.error.message, /MCP-Protocol-Version/);
+});
+
+test('modern request rejects unsupported protocol versions explicitly', async () => {
+  const futureVersion = '2099-01-01';
+  const futureMeta = {
+    ...meta(),
+    [PROTOCOL_VERSION_META]: futureVersion,
+  };
+
+  const response = await handleMcpMessage(
+    {},
+    {
+      jsonrpc: '2.0',
+      id: 'future',
+      method: 'server/discover',
+      params: { _meta: futureMeta },
+    },
+    context('server/discover', undefined, futureVersion),
+  );
+
+  assert.equal(response.error.code, -32022);
+  assert.deepEqual(response.error.data.supportedVersions, [MODERN_PROTOCOL_VERSION]);
+});
+
+test('modern request rejects malformed clientInfo when supplied', async () => {
+  const malformedMeta = {
+    ...meta(),
+    [CLIENT_INFO_META]: { name: 'missing-version' },
+  };
+
+  const response = await handleMcpMessage(
+    {},
+    {
+      jsonrpc: '2.0',
+      id: 'bad-client-info',
+      method: 'tools/list',
+      params: { _meta: malformedMeta },
+    },
+    context('tools/list'),
+  );
+
+  assert.equal(response.error.code, -32602);
+  assert.match(response.error.message, /clientInfo/);
 });
 
 test('modern request rejects routing header mismatch', async () => {
