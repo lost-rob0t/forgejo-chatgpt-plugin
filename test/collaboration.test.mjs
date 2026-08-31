@@ -110,6 +110,57 @@ test('pull review readers use Forgejo review endpoints', async () => {
   assert.equal(calls[1].path, '/repos/o/r/pulls/22/reviews/99/comments');
 });
 
+test('PR commit reader forwards expansion controls and pagination', async () => {
+  const { client, calls } = recorder([]);
+
+  await callCollaborationTool(client, 'forgejo_get_pull_request_commits', {
+    owner: 'o',
+    repo: 'r',
+    index: 22,
+    verification: true,
+    files: false,
+    page: 2,
+    limit: 15,
+  });
+
+  assert.equal(calls[0].path, '/repos/o/r/pulls/22/commits');
+  assert.deepEqual(calls[0].options.query, {
+    verification: true,
+    files: false,
+    page: 2,
+    limit: 15,
+  });
+});
+
+test('combined and individual commit status readers use ref endpoints', async () => {
+  const { client, calls } = recorder([]);
+
+  await callCollaborationTool(client, 'forgejo_get_combined_status', {
+    owner: 'o',
+    repo: 'r',
+    ref: 'feature/test',
+    page: 1,
+    limit: 20,
+  });
+  await callCollaborationTool(client, 'forgejo_list_commit_statuses', {
+    owner: 'o',
+    repo: 'r',
+    ref: 'abc123',
+    state: 'failure',
+    page: 3,
+    limit: 5,
+  });
+
+  assert.equal(calls[0].path, '/repos/o/r/commits/feature%2Ftest/status');
+  assert.deepEqual(calls[0].options.query, { page: 1, limit: 20 });
+  assert.equal(calls[1].path, '/repos/o/r/commits/abc123/statuses');
+  assert.deepEqual(calls[1].options.query, {
+    state: 'failure',
+    page: 3,
+    limit: 5,
+  });
+});
+
 test('PR edit override forwards labels and maintainer-edit permission', async () => {
   const { client, calls } = recorder({ index: 5 });
 
