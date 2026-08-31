@@ -147,7 +147,7 @@ test('modern request rejects routing header mismatch', async () => {
   assert.match(response.error.message, /Mcp-Name/);
 });
 
-test('modern tools/call routes write tools and stamps complete result', async () => {
+test('modern tools/call routes write tools with structured output', async () => {
   let seen;
   const client = {
     createBranch: async (owner, repo, newBranchName, options) => {
@@ -181,7 +181,30 @@ test('modern tools/call routes write tools and stamps complete result', async ()
   assert.equal(seen.newBranchName, 'chatgpt-write-test');
   assert.equal(seen.options.oldRefName, 'main');
   assert.equal(response.result.resultType, 'complete');
+  assert.deepEqual(response.result.structuredContent, {
+    data: { name: 'chatgpt-write-test' },
+  });
   assert.match(response.result.content[0].text, /chatgpt-write-test/);
+});
+
+test('legacy tools/call also gets object-shaped structured output', async () => {
+  const client = {
+    listRepositories: async () => [{ name: 'demo' }],
+  };
+
+  const response = await handleMcpMessage(client, {
+    jsonrpc: '2.0',
+    id: 'legacy-tool',
+    method: 'tools/call',
+    params: {
+      name: 'forgejo_list_repositories',
+      arguments: {},
+    },
+  });
+
+  assert.deepEqual(response.result.structuredContent, {
+    data: [{ name: 'demo' }],
+  });
 });
 
 test('legacy initialize remains supported without modern headers', async () => {
