@@ -165,6 +165,51 @@ export const COLLABORATION_TOOLS = [
     ),
     annotations: READ_ONLY,
   },
+  {
+    name: 'forgejo_get_pull_request_commits',
+    title: 'Get Forgejo pull request commits',
+    description: 'List commits belonging to a pull request. File and signature verification expansion can be disabled to reduce payload size.',
+    inputSchema: repoSchema(
+      {
+        index: { type: 'integer', minimum: 1 },
+        verification: { type: 'boolean', default: false },
+        files: { type: 'boolean', default: false },
+        ...pagination,
+      },
+      ['index'],
+    ),
+    annotations: READ_ONLY,
+  },
+  {
+    name: 'forgejo_get_combined_status',
+    title: 'Get Forgejo combined commit status',
+    description: 'Get the combined status for a branch, tag, or commit reference.',
+    inputSchema: repoSchema(
+      {
+        ref: { type: 'string', minLength: 1 },
+        ...pagination,
+      },
+      ['ref'],
+    ),
+    annotations: READ_ONLY,
+  },
+  {
+    name: 'forgejo_list_commit_statuses',
+    title: 'List Forgejo commit statuses',
+    description: 'List individual commit statuses for a branch, tag, or commit reference.',
+    inputSchema: repoSchema(
+      {
+        ref: { type: 'string', minLength: 1 },
+        state: {
+          type: 'string',
+          enum: ['pending', 'success', 'error', 'failure', 'warning'],
+        },
+        ...pagination,
+      },
+      ['ref'],
+    ),
+    annotations: READ_ONLY,
+  },
 ];
 
 export const EDIT_PULL_REQUEST_OVERRIDE = {
@@ -242,6 +287,45 @@ async function getPullReviewComments(client, args) {
   );
 }
 
+async function getPullRequestCommits(client, args) {
+  return client.json(
+    `${repoPath(args.owner, args.repo)}/pulls/${segment(args.index)}/commits`,
+    {
+      query: {
+        verification: args.verification,
+        files: args.files,
+        page: pageNumber(args.page),
+        limit: clampLimit(args.limit),
+      },
+    },
+  );
+}
+
+async function getCombinedStatus(client, args) {
+  return client.json(
+    `${repoPath(args.owner, args.repo)}/commits/${segment(args.ref)}/status`,
+    {
+      query: {
+        page: pageNumber(args.page),
+        limit: clampLimit(args.limit),
+      },
+    },
+  );
+}
+
+async function listCommitStatuses(client, args) {
+  return client.json(
+    `${repoPath(args.owner, args.repo)}/commits/${segment(args.ref)}/statuses`,
+    {
+      query: {
+        state: args.state,
+        page: pageNumber(args.page),
+        limit: clampLimit(args.limit),
+      },
+    },
+  );
+}
+
 async function editPullRequest(client, args) {
   return client.json(
     `${repoPath(args.owner, args.repo)}/pulls/${segment(args.index)}`,
@@ -281,6 +365,12 @@ export async function callCollaborationTool(client, name, args) {
       return listPullReviews(client, args);
     case 'forgejo_get_pull_request_review_comments':
       return getPullReviewComments(client, args);
+    case 'forgejo_get_pull_request_commits':
+      return getPullRequestCommits(client, args);
+    case 'forgejo_get_combined_status':
+      return getCombinedStatus(client, args);
+    case 'forgejo_list_commit_statuses':
+      return listCommitStatuses(client, args);
     case 'forgejo_edit_pull_request':
       return editPullRequest(client, args);
     default:
