@@ -102,7 +102,7 @@ The flake exports:
 - `nixosModules.default`
 - `devShells.<system>.default`
 
-Example NixOS service:
+Example NixOS service when the MCP server runs beside Forgejo:
 
 ```nix
 {
@@ -110,7 +110,7 @@ Example NixOS service:
 
   services.forgejo-chatgpt-plugin = {
     enable = true;
-    forgejoBaseUrl = "https://git.starintel.actor";
+    forgejoBaseUrl = "http://127.0.0.1:3000";
     tokenFile = "/var/lib/starintel/secrets/forgejo-chatgpt-token";
     listenAddress = "127.0.0.1";
     port = 9473;
@@ -118,7 +118,7 @@ Example NixOS service:
 }
 ```
 
-`tokenFile` and `inboundBearerTokenFile` are runtime path strings. The module loads them with systemd credentials so token values are not placed in the Nix store or process arguments.
+Using Forgejo's local/private listener avoids bouncing MCP API traffic through the public Git ingress path. `tokenFile` and `inboundBearerTokenFile` are runtime path strings. The module loads them with systemd credentials so token values are not placed in the Nix store or process arguments.
 
 ## ChatGPT
 
