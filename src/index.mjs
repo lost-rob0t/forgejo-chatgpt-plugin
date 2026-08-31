@@ -3,7 +3,7 @@
 import { loadConfig } from './config.mjs';
 import { ForgejoClient } from './forgejo.mjs';
 import { createMcpHttpServer } from './http.mjs';
-import { handleMcpMessage } from './mcp.mjs';
+import { handleMcpMessage } from './protocol.mjs';
 
 const config = await loadConfig();
 const client = new ForgejoClient({
