@@ -97,14 +97,14 @@ Example NixOS service:
   services.forgejo-chatgpt-plugin = {
     enable = true;
     forgejoBaseUrl = "https://git.starintel.actor";
-    tokenFile = config.sops.secrets.forgejo-chatgpt-token.path;
+    tokenFile = "/var/lib/starintel/secrets/forgejo-chatgpt-token";
     listenAddress = "127.0.0.1";
     port = 9473;
   };
 }
 ```
 
-The module loads secrets with systemd credentials so the token value is not placed in the Nix store or process arguments.
+`tokenFile` and `inboundBearerTokenFile` are runtime path strings. The module loads them with systemd credentials so the token values are not placed in the Nix store or process arguments.
 
 ## ChatGPT
 
