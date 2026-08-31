@@ -9,6 +9,7 @@ import {
 export const MODERN_PROTOCOL_VERSION = '2026-07-28';
 
 const PROTOCOL_VERSION_META = 'io.modelcontextprotocol/protocolVersion';
+const CLIENT_INFO_META = 'io.modelcontextprotocol/clientInfo';
 const SERVER_INFO_META = 'io.modelcontextprotocol/serverInfo';
 const SERVER_INFO = {
   name: 'forgejo-chatgpt-plugin',
@@ -67,17 +68,52 @@ function expectedNameHeader(message) {
   return undefined;
 }
 
+function validateClientInfo(message) {
+  const clientInfo = requestMeta(message)[CLIENT_INFO_META];
+  if (clientInfo === undefined) return null;
+
+  if (
+    !clientInfo ||
+    typeof clientInfo !== 'object' ||
+    Array.isArray(clientInfo) ||
+    typeof clientInfo.name !== 'string' ||
+    clientInfo.name.length === 0 ||
+    typeof clientInfo.version !== 'string' ||
+    clientInfo.version.length === 0
+  ) {
+    return jsonRpcError(
+      message.id,
+      -32602,
+      'io.modelcontextprotocol/clientInfo must contain non-empty name and version strings',
+    );
+  }
+
+  return null;
+}
+
 function validateModernRequest(message, context) {
   const bodyVersion = bodyProtocolVersion(message);
   const headerVersion = context.protocolVersion;
 
-  if (bodyVersion !== MODERN_PROTOCOL_VERSION) {
+  if (bodyVersion === undefined) {
     return jsonRpcError(
       message.id,
       -32602,
       'Modern MCP requests must declare io.modelcontextprotocol/protocolVersion in params._meta',
     );
   }
+
+  if (bodyVersion !== MODERN_PROTOCOL_VERSION) {
+    return jsonRpcError(
+      message.id,
+      -32022,
+      `Unsupported MCP protocol version: ${String(bodyVersion)}`,
+      { supportedVersions: [MODERN_PROTOCOL_VERSION] },
+    );
+  }
+
+  const clientInfoError = validateClientInfo(message);
+  if (clientInfoError) return clientInfoError;
 
   if (!headerVersion) {
     return jsonRpcError(
@@ -227,7 +263,7 @@ async function handleApplicationMessage(client, message) {
 
 export function isModernMessage(message, context = {}) {
   return (
-    bodyProtocolVersion(message) === MODERN_PROTOCOL_VERSION ||
+    bodyProtocolVersion(message) !== undefined ||
     context.protocolVersion === MODERN_PROTOCOL_VERSION
   );
 }
