@@ -5,6 +5,7 @@ import {
   COLLABORATION_TOOLS,
   EDIT_PULL_REQUEST_OVERRIDE,
 } from './collaboration.mjs';
+import { validateToolArguments } from './validate.mjs';
 
 export const MODERN_PROTOCOL_VERSION = '2026-07-28';
 
@@ -40,6 +41,8 @@ export const TOOLS = COMPOSED_TOOLS.map((tool) => ({
   ...tool,
   outputSchema: tool.outputSchema ?? TOOL_OUTPUT_SCHEMA,
 }));
+
+const TOOL_BY_NAME = new Map(TOOLS.map((tool) => [tool.name, tool]));
 
 function jsonRpcError(id, code, message, data) {
   return {
@@ -84,7 +87,7 @@ function addStructuredContent(response) {
   try {
     data = JSON.parse(textBlock.text);
   } catch {
-    // Plain text is still useful structured data when wrapped in an object.
+    // Plain text remains useful when wrapped in an object-shaped result.
   }
 
   return {
@@ -270,6 +273,25 @@ async function handleToolsCall(client, message) {
 
   if (typeof name !== 'string') {
     return jsonRpcError(message.id, -32602, 'tools/call requires a tool name');
+  }
+
+  const tool = TOOL_BY_NAME.get(name);
+  if (!tool) {
+    return {
+      jsonrpc: '2.0',
+      id: message.id,
+      result: errorResult(new Error(`unknown tool: ${name}`)),
+    };
+  }
+
+  try {
+    validateToolArguments(tool, args);
+  } catch (error) {
+    return {
+      jsonrpc: '2.0',
+      id: message.id,
+      result: errorResult(error),
+    };
   }
 
   if (!isCollaborationTool(name)) {
