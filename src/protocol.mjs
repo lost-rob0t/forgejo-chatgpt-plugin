@@ -18,14 +18,28 @@ const SERVER_INFO = {
 const INSTRUCTIONS =
   'Forgejo repository access with explicit read and write tools. Prefer feature branches plus pull requests for code changes. Read current file SHAs before update/delete operations. Read issue and pull-request comments/reviews before acting on discussion context. Merge, branch deletion, and file deletion are destructive actions and should only be used when the user clearly requests them.';
 
+const TOOL_OUTPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    data: {},
+  },
+  required: ['data'],
+  additionalProperties: false,
+};
+
 const COLLABORATION_NAMES = collaborationToolNames();
 const OVERRIDDEN_TOOL_NAMES = new Set([EDIT_PULL_REQUEST_OVERRIDE.name]);
 
-export const TOOLS = [
+const COMPOSED_TOOLS = [
   ...CORE_TOOLS.filter((tool) => !OVERRIDDEN_TOOL_NAMES.has(tool.name)),
   EDIT_PULL_REQUEST_OVERRIDE,
   ...COLLABORATION_TOOLS,
 ];
+
+export const TOOLS = COMPOSED_TOOLS.map((tool) => ({
+  ...tool,
+  outputSchema: tool.outputSchema ?? TOOL_OUTPUT_SCHEMA,
+}));
 
 function jsonRpcError(id, code, message, data) {
   return {
@@ -41,12 +55,45 @@ function jsonRpcError(id, code, message, data) {
 
 function textResult(value) {
   const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-  return { content: [{ type: 'text', text }] };
+  return {
+    content: [{ type: 'text', text }],
+    structuredContent: { data: value },
+  };
 }
 
 function errorResult(error) {
   const message = error instanceof Error ? error.message : String(error);
   return { content: [{ type: 'text', text: message }], isError: true };
+}
+
+function addStructuredContent(response) {
+  if (
+    !response ||
+    response.error ||
+    !response.result ||
+    response.result.isError ||
+    response.result.structuredContent !== undefined
+  ) {
+    return response;
+  }
+
+  const textBlock = response.result.content?.find((block) => block?.type === 'text');
+  if (!textBlock || typeof textBlock.text !== 'string') return response;
+
+  let data = textBlock.text;
+  try {
+    data = JSON.parse(textBlock.text);
+  } catch {
+    // Plain text is still useful structured data when wrapped in an object.
+  }
+
+  return {
+    ...response,
+    result: {
+      ...response.result,
+      structuredContent: { data },
+    },
+  };
 }
 
 function requestMeta(message) {
@@ -226,7 +273,7 @@ async function handleToolsCall(client, message) {
   }
 
   if (!isCollaborationTool(name)) {
-    return handleCoreMcpMessage(client, message);
+    return addStructuredContent(await handleCoreMcpMessage(client, message));
   }
 
   try {
