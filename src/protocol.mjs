@@ -1,4 +1,10 @@
-import { handleMcpMessage as handleLegacyMcpMessage, TOOLS } from './mcp.mjs';
+import { handleMcpMessage as handleCoreMcpMessage, TOOLS as CORE_TOOLS } from './mcp.mjs';
+import {
+  callCollaborationTool,
+  collaborationToolNames,
+  COLLABORATION_TOOLS,
+  EDIT_PULL_REQUEST_OVERRIDE,
+} from './collaboration.mjs';
 
 export const MODERN_PROTOCOL_VERSION = '2026-07-28';
 
@@ -9,7 +15,16 @@ const SERVER_INFO = {
   version: '0.2.0',
 };
 const INSTRUCTIONS =
-  'Forgejo repository access with explicit read and write tools. Prefer feature branches plus pull requests for code changes. Read current file SHAs before update/delete operations. Merge, branch deletion, and file deletion are destructive actions and should only be used when the user clearly requests them.';
+  'Forgejo repository access with explicit read and write tools. Prefer feature branches plus pull requests for code changes. Read current file SHAs before update/delete operations. Read issue and pull-request comments/reviews before acting on discussion context. Merge, branch deletion, and file deletion are destructive actions and should only be used when the user clearly requests them.';
+
+const COLLABORATION_NAMES = collaborationToolNames();
+const OVERRIDDEN_TOOL_NAMES = new Set([EDIT_PULL_REQUEST_OVERRIDE.name]);
+
+export const TOOLS = [
+  ...CORE_TOOLS.filter((tool) => !OVERRIDDEN_TOOL_NAMES.has(tool.name)),
+  EDIT_PULL_REQUEST_OVERRIDE,
+  ...COLLABORATION_TOOLS,
+];
 
 function jsonRpcError(id, code, message, data) {
   return {
@@ -21,6 +36,16 @@ function jsonRpcError(id, code, message, data) {
       ...(data === undefined ? {} : { data }),
     },
   };
+}
+
+function textResult(value) {
+  const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  return { content: [{ type: 'text', text }] };
+}
+
+function errorResult(error) {
+  const message = error instanceof Error ? error.message : String(error);
+  return { content: [{ type: 'text', text: message }], isError: true };
 }
 
 function requestMeta(message) {
@@ -63,35 +88,49 @@ function validateModernRequest(message, context) {
   }
 
   if (headerVersion !== bodyVersion) {
-    return jsonRpcError(message.id, -32020, 'Header mismatch: MCP-Protocol-Version does not match request metadata', {
-      header: headerVersion,
-      body: bodyVersion,
-    });
+    return jsonRpcError(
+      message.id,
+      -32020,
+      'Header mismatch: MCP-Protocol-Version does not match request metadata',
+      { header: headerVersion, body: bodyVersion },
+    );
   }
 
   if (!isRequest(message)) return null;
 
   if (!context.methodHeader) {
-    return jsonRpcError(message.id, -32020, 'Header mismatch: Mcp-Method is required for modern MCP requests');
+    return jsonRpcError(
+      message.id,
+      -32020,
+      'Header mismatch: Mcp-Method is required for modern MCP requests',
+    );
   }
 
   if (context.methodHeader !== message.method) {
-    return jsonRpcError(message.id, -32020, 'Header mismatch: Mcp-Method does not match JSON-RPC method', {
-      header: context.methodHeader,
-      body: message.method,
-    });
+    return jsonRpcError(
+      message.id,
+      -32020,
+      'Header mismatch: Mcp-Method does not match JSON-RPC method',
+      { header: context.methodHeader, body: message.method },
+    );
   }
 
   const expectedName = expectedNameHeader(message);
   if (expectedName !== undefined) {
     if (!context.nameHeader) {
-      return jsonRpcError(message.id, -32020, 'Header mismatch: Mcp-Name is required for this MCP request');
+      return jsonRpcError(
+        message.id,
+        -32020,
+        'Header mismatch: Mcp-Name is required for this MCP request',
+      );
     }
     if (context.nameHeader !== String(expectedName)) {
-      return jsonRpcError(message.id, -32020, 'Header mismatch: Mcp-Name does not match request parameters', {
-        header: context.nameHeader,
-        body: String(expectedName),
-      });
+      return jsonRpcError(
+        message.id,
+        -32020,
+        'Header mismatch: Mcp-Name does not match request parameters',
+        { header: context.nameHeader, body: String(expectedName) },
+      );
     }
   }
 
@@ -119,10 +158,7 @@ function completeModernResponse(response, method) {
     result.cacheScope = 'private';
   }
 
-  return {
-    ...response,
-    result,
-  };
+  return { ...response, result };
 }
 
 function discoverResponse(message) {
@@ -132,15 +168,61 @@ function discoverResponse(message) {
     result: {
       resultType: 'complete',
       supportedVersions: [MODERN_PROTOCOL_VERSION],
-      capabilities: {
-        tools: { listChanged: false },
-      },
+      capabilities: { tools: { listChanged: false } },
       instructions: INSTRUCTIONS,
       ttlMs: 30_000,
       cacheScope: 'private',
       _meta: modernMeta(),
     },
   };
+}
+
+function isCollaborationTool(name) {
+  return COLLABORATION_NAMES.has(name) || OVERRIDDEN_TOOL_NAMES.has(name);
+}
+
+async function handleToolsCall(client, message) {
+  const name = message.params?.name;
+  const args = message.params?.arguments ?? {};
+
+  if (typeof name !== 'string') {
+    return jsonRpcError(message.id, -32602, 'tools/call requires a tool name');
+  }
+
+  if (!isCollaborationTool(name)) {
+    return handleCoreMcpMessage(client, message);
+  }
+
+  try {
+    const result = await callCollaborationTool(client, name, args);
+    return {
+      jsonrpc: '2.0',
+      id: message.id,
+      result: textResult(result),
+    };
+  } catch (error) {
+    return {
+      jsonrpc: '2.0',
+      id: message.id,
+      result: errorResult(error),
+    };
+  }
+}
+
+async function handleApplicationMessage(client, message) {
+  if (message.method === 'tools/list') {
+    return {
+      jsonrpc: '2.0',
+      id: message.id,
+      result: { tools: TOOLS },
+    };
+  }
+
+  if (message.method === 'tools/call') {
+    return handleToolsCall(client, message);
+  }
+
+  return handleCoreMcpMessage(client, message);
 }
 
 export function isModernMessage(message, context = {}) {
@@ -150,17 +232,11 @@ export function isModernMessage(message, context = {}) {
   );
 }
 
-export function protocolHttpStatus(result, modern) {
-  if (!modern || !result?.error) return 200;
-  if ([-32602, -32020, -32022].includes(result.error.code)) return 400;
-  return 200;
-}
-
 export async function handleMcpMessage(client, message, context = {}) {
   const modern = isModernMessage(message, context);
 
   if (!modern) {
-    return handleLegacyMcpMessage(client, message);
+    return handleApplicationMessage(client, message);
   }
 
   const validationError = validateModernRequest(message, context);
@@ -178,8 +254,6 @@ export async function handleMcpMessage(client, message, context = {}) {
     );
   }
 
-  const response = await handleLegacyMcpMessage(client, message);
+  const response = await handleApplicationMessage(client, message);
   return completeModernResponse(response, message.method);
 }
-
-export { TOOLS };
