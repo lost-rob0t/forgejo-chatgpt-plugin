@@ -106,9 +106,9 @@ test('modern request rejects routing header mismatch', async () => {
 test('modern tools/call routes write tools and stamps complete result', async () => {
   let seen;
   const client = {
-    createBranch: async (owner, repo, args) => {
-      seen = { owner, repo, args };
-      return { name: args.new_branch_name };
+    createBranch: async (owner, repo, newBranchName, options) => {
+      seen = { owner, repo, newBranchName, options };
+      return { name: newBranchName };
     },
   };
 
@@ -134,7 +134,8 @@ test('modern tools/call routes write tools and stamps complete result', async ()
 
   assert.equal(seen.owner, 'starintel');
   assert.equal(seen.repo, 'demo');
-  assert.equal(seen.args.new_branch_name, 'chatgpt-write-test');
+  assert.equal(seen.newBranchName, 'chatgpt-write-test');
+  assert.equal(seen.options.oldRefName, 'main');
   assert.equal(response.result.resultType, 'complete');
   assert.match(response.result.content[0].text, /chatgpt-write-test/);
 });
