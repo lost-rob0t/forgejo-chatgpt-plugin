@@ -88,6 +88,8 @@ npm test
 
 The tests use Node's built-in test runner and have no external dependencies. They cover request authentication, bounded reads, mutation verbs/bodies, atomic multi-file commits, merge payloads, MCP tool routing, write/destructive annotations, HTTP transport, and inbound bearer auth.
 
+The original read-only slice was executed successfully before write support was added. The expanded v0.2 write tests are committed but still need to be executed in a normal development/Nix environment before merge; the ChatGPT execution container used for this implementation has no outbound DNS and no Nix installation.
+
 ## Nix
 
 Build the package:
