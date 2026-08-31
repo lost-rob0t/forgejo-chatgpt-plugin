@@ -2,6 +2,24 @@ function segment(value) {
   return encodeURIComponent(String(value));
 }
 
+function repoPath(owner, repo) {
+  return `/repos/${segment(owner)}/${segment(repo)}`;
+}
+
+function contentPath(path) {
+  return String(path)
+    .split('/')
+    .filter(Boolean)
+    .map(segment)
+    .join('/');
+}
+
+function compact(value) {
+  return Object.fromEntries(
+    Object.entries(value).filter(([, item]) => item !== undefined && item !== null),
+  );
+}
+
 function clampLimit(limit, fallback = 30, max = 100) {
   if (limit === undefined) return fallback;
   const value = Number(limit);
@@ -25,6 +43,10 @@ function addQuery(url, query) {
     if (value === undefined || value === null || value === '') continue;
     url.searchParams.set(key, String(value));
   }
+}
+
+function base64Utf8(content) {
+  return Buffer.from(String(content), 'utf8').toString('base64');
 }
 
 export class ForgejoError extends Error {
@@ -55,22 +77,29 @@ export class ForgejoClient {
     return url;
   }
 
-  async request(path, { query = {}, accept = 'application/json' } = {}) {
+  async request(
+    path,
+    { query = {}, accept = 'application/json', method = 'GET', body } = {},
+  ) {
     const url = this.apiUrl(path, query);
+    const headers = {
+      Accept: accept,
+      Authorization: `token ${this.token}`,
+      'User-Agent': 'forgejo-chatgpt-plugin/0.2.0',
+    };
+    if (body !== undefined) headers['Content-Type'] = 'application/json';
+
     const response = await this.fetchImpl(url, {
-      method: 'GET',
-      headers: {
-        Accept: accept,
-        Authorization: `token ${this.token}`,
-        'User-Agent': 'forgejo-chatgpt-plugin/0.1.0',
-      },
+      method,
+      headers,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
 
     if (!response.ok) {
-      const body = (await response.text()).slice(0, 4096);
+      const responseBody = (await response.text()).slice(0, 4096);
       throw new ForgejoError(
         `Forgejo request failed: ${response.status} ${response.statusText}`,
-        { status: response.status, body, url: url.toString() },
+        { status: response.status, body: responseBody, url: url.toString() },
       );
     }
 
@@ -79,7 +108,10 @@ export class ForgejoClient {
 
   async json(path, options) {
     const response = await this.request(path, options);
-    return response.json();
+    if (response.status === 204) return { ok: true, status: 204 };
+    const text = await response.text();
+    if (!text) return { ok: true, status: response.status };
+    return JSON.parse(text);
   }
 
   async ping() {
@@ -93,17 +125,33 @@ export class ForgejoClient {
   }
 
   async getRepository(owner, repo) {
-    return this.json(`/repos/${segment(owner)}/${segment(repo)}`);
+    return this.json(repoPath(owner, repo));
   }
 
   async listBranches(owner, repo, { page, limit } = {}) {
-    return this.json(`/repos/${segment(owner)}/${segment(repo)}/branches`, {
+    return this.json(`${repoPath(owner, repo)}/branches`, {
       query: { page: pageNumber(page), limit: clampLimit(limit, 30) },
     });
   }
 
+  async createBranch(owner, repo, newBranchName, { oldRefName } = {}) {
+    return this.json(`${repoPath(owner, repo)}/branches`, {
+      method: 'POST',
+      body: compact({
+        new_branch_name: newBranchName,
+        old_ref_name: oldRefName,
+      }),
+    });
+  }
+
+  async deleteBranch(owner, repo, branch) {
+    return this.json(`${repoPath(owner, repo)}/branches/${segment(branch)}`, {
+      method: 'DELETE',
+    });
+  }
+
   async listCommits(owner, repo, { ref, page, limit } = {}) {
-    return this.json(`/repos/${segment(owner)}/${segment(repo)}/commits`, {
+    return this.json(`${repoPath(owner, repo)}/commits`, {
       query: {
         sha: ref,
         page: pageNumber(page),
@@ -113,20 +161,14 @@ export class ForgejoClient {
   }
 
   async getTree(owner, repo, ref, { recursive = false } = {}) {
-    return this.json(
-      `/repos/${segment(owner)}/${segment(repo)}/git/trees/${segment(ref)}`,
-      { query: { recursive: Boolean(recursive) } },
-    );
+    return this.json(`${repoPath(owner, repo)}/git/trees/${segment(ref)}`, {
+      query: { recursive: Boolean(recursive) },
+    });
   }
 
   async readFile(owner, repo, path, { ref } = {}) {
-    const encodedPath = String(path)
-      .split('/')
-      .filter(Boolean)
-      .map(segment)
-      .join('/');
     const value = await this.json(
-      `/repos/${segment(owner)}/${segment(repo)}/contents/${encodedPath}`,
+      `${repoPath(owner, repo)}/contents/${contentPath(path)}`,
       { query: { ref } },
     );
 
@@ -155,8 +197,82 @@ export class ForgejoClient {
     };
   }
 
+  async createFile(owner, repo, path, content, options = {}) {
+    return this.json(`${repoPath(owner, repo)}/contents/${contentPath(path)}`, {
+      method: 'POST',
+      body: compact({
+        content: base64Utf8(content),
+        branch: options.branch,
+        new_branch: options.new_branch,
+        message: options.message,
+        signoff: options.signoff,
+      }),
+    });
+  }
+
+  async updateFile(owner, repo, path, sha, content, options = {}) {
+    return this.json(`${repoPath(owner, repo)}/contents/${contentPath(path)}`, {
+      method: 'PUT',
+      body: compact({
+        sha,
+        content: base64Utf8(content),
+        branch: options.branch,
+        new_branch: options.new_branch,
+        message: options.message,
+        signoff: options.signoff,
+        from_path: options.from_path,
+      }),
+    });
+  }
+
+  async deleteFile(owner, repo, path, sha, options = {}) {
+    return this.json(`${repoPath(owner, repo)}/contents/${contentPath(path)}`, {
+      method: 'DELETE',
+      body: compact({
+        sha,
+        branch: options.branch,
+        new_branch: options.new_branch,
+        message: options.message,
+        signoff: options.signoff,
+      }),
+    });
+  }
+
+  async commitChanges(owner, repo, { branch, new_branch, message, signoff, files }) {
+    if (!Array.isArray(files) || files.length < 1 || files.length > 100) {
+      throw new Error('files must contain between 1 and 100 operations');
+    }
+
+    const normalized = files.map((file) => {
+      const operation = file.operation;
+      if (!['create', 'update', 'delete'].includes(operation)) {
+        throw new Error(`unsupported file operation: ${operation}`);
+      }
+      if (!file.path) throw new Error('every file operation requires path');
+      if ((operation === 'update' || operation === 'delete') && !file.sha) {
+        throw new Error(`${operation} requires the current file sha`);
+      }
+      if (operation !== 'delete' && typeof file.content !== 'string') {
+        throw new Error(`${operation} requires UTF-8 content`);
+      }
+
+      return compact({
+        operation,
+        path: file.path,
+        sha: file.sha,
+        from_path: file.from_path,
+        content: operation === 'delete' ? undefined : base64Utf8(file.content),
+      });
+    });
+
+    return this.json(`${repoPath(owner, repo)}/contents`, {
+      method: 'POST',
+      body: compact({ branch, new_branch, message, signoff, files: normalized }),
+    });
+  }
+
   async searchCode(owner, repo, query, { ref, page, limit } = {}) {
-    return this.json(`/repos/${segment(owner)}/${segment(repo)}/search`, {
+    return this.json(`${repoPath(owner, repo)}/search`, {
       query: {
         q: query,
         type: 'code',
@@ -168,7 +284,7 @@ export class ForgejoClient {
   }
 
   async listIssues(owner, repo, { state = 'open', page, limit } = {}) {
-    return this.json(`/repos/${segment(owner)}/${segment(repo)}/issues`, {
+    return this.json(`${repoPath(owner, repo)}/issues`, {
       query: {
         state,
         type: 'issues',
@@ -179,13 +295,48 @@ export class ForgejoClient {
   }
 
   async getIssue(owner, repo, index) {
-    return this.json(
-      `/repos/${segment(owner)}/${segment(repo)}/issues/${segment(index)}`,
-    );
+    return this.json(`${repoPath(owner, repo)}/issues/${segment(index)}`);
+  }
+
+  async createIssue(owner, repo, options) {
+    return this.json(`${repoPath(owner, repo)}/issues`, {
+      method: 'POST',
+      body: compact({
+        title: options.title,
+        body: options.body,
+        assignees: options.assignees,
+        labels: options.labels,
+        milestone: options.milestone,
+        due_date: options.due_date,
+        closed: options.closed,
+      }),
+    });
+  }
+
+  async editIssue(owner, repo, index, options) {
+    return this.json(`${repoPath(owner, repo)}/issues/${segment(index)}`, {
+      method: 'PATCH',
+      body: compact({
+        title: options.title,
+        body: options.body,
+        state: options.state,
+        assignees: options.assignees,
+        milestone: options.milestone,
+        due_date: options.due_date,
+        unset_due_date: options.unset_due_date,
+      }),
+    });
+  }
+
+  async commentIssue(owner, repo, index, body) {
+    return this.json(`${repoPath(owner, repo)}/issues/${segment(index)}/comments`, {
+      method: 'POST',
+      body: { body },
+    });
   }
 
   async listPullRequests(owner, repo, { state = 'open', page, limit } = {}) {
-    return this.json(`/repos/${segment(owner)}/${segment(repo)}/pulls`, {
+    return this.json(`${repoPath(owner, repo)}/pulls`, {
       query: {
         state,
         page: pageNumber(page),
@@ -195,21 +346,50 @@ export class ForgejoClient {
   }
 
   async getPullRequest(owner, repo, index) {
-    return this.json(
-      `/repos/${segment(owner)}/${segment(repo)}/pulls/${segment(index)}`,
-    );
+    return this.json(`${repoPath(owner, repo)}/pulls/${segment(index)}`);
+  }
+
+  async createPullRequest(owner, repo, options) {
+    return this.json(`${repoPath(owner, repo)}/pulls`, {
+      method: 'POST',
+      body: compact({
+        title: options.title,
+        body: options.body,
+        head: options.head,
+        base: options.base,
+        assignees: options.assignees,
+        labels: options.labels,
+        milestone: options.milestone,
+        due_date: options.due_date,
+      }),
+    });
+  }
+
+  async editPullRequest(owner, repo, index, options) {
+    return this.json(`${repoPath(owner, repo)}/pulls/${segment(index)}`, {
+      method: 'PATCH',
+      body: compact({
+        title: options.title,
+        body: options.body,
+        state: options.state,
+        base: options.base,
+        assignees: options.assignees,
+        milestone: options.milestone,
+        due_date: options.due_date,
+        unset_due_date: options.unset_due_date,
+      }),
+    });
   }
 
   async getPullRequestFiles(owner, repo, index, { page, limit } = {}) {
-    return this.json(
-      `/repos/${segment(owner)}/${segment(repo)}/pulls/${segment(index)}/files`,
-      { query: { page: pageNumber(page), limit: clampLimit(limit, 30) } },
-    );
+    return this.json(`${repoPath(owner, repo)}/pulls/${segment(index)}/files`, {
+      query: { page: pageNumber(page), limit: clampLimit(limit, 30) },
+    });
   }
 
   async getPullRequestDiff(owner, repo, index) {
     const response = await this.request(
-      `/repos/${segment(owner)}/${segment(repo)}/pulls/${segment(index)}.diff`,
+      `${repoPath(owner, repo)}/pulls/${segment(index)}.diff`,
       { accept: 'text/plain, application/octet-stream;q=0.9, */*;q=0.1' },
     );
     const bytes = Buffer.from(await response.arrayBuffer());
@@ -222,5 +402,34 @@ export class ForgejoClient {
       returned_bytes: visible.byteLength,
       diff: visible.toString('utf8'),
     };
+  }
+
+  async requestPullRequestReviewers(owner, repo, index, { reviewers, team_reviewers }) {
+    return this.json(
+      `${repoPath(owner, repo)}/pulls/${segment(index)}/requested_reviewers`,
+      { method: 'POST', body: compact({ reviewers, team_reviewers }) },
+    );
+  }
+
+  async reviewPullRequest(owner, repo, index, { event, body, commit_id, comments }) {
+    return this.json(`${repoPath(owner, repo)}/pulls/${segment(index)}/reviews`, {
+      method: 'POST',
+      body: compact({ event, body, commit_id, comments }),
+    });
+  }
+
+  async mergePullRequest(owner, repo, index, options = {}) {
+    return this.json(`${repoPath(owner, repo)}/pulls/${segment(index)}/merge`, {
+      method: 'POST',
+      body: compact({
+        Do: options.method ?? 'merge',
+        MergeTitleField: options.title,
+        MergeMessageField: options.message,
+        delete_branch_after_merge: options.delete_branch_after_merge,
+        force_merge: options.force_merge,
+        head_commit_id: options.head_commit_id,
+        merge_when_checks_succeed: options.merge_when_checks_succeed,
+      }),
+    });
   }
 }
