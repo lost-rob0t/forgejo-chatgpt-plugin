@@ -2,7 +2,7 @@
 
 stdenvNoCC.mkDerivation {
   pname = "forgejo-chatgpt-plugin";
-  version = "0.1.0";
+  version = "0.2.0";
 
   src = lib.cleanSourceWith {
     src = ../.;
@@ -31,7 +31,7 @@ stdenvNoCC.mkDerivation {
   '';
 
   meta = {
-    description = "Read-only Forgejo MCP server for ChatGPT custom apps";
+    description = "Read-write Forgejo MCP server for ChatGPT custom apps";
     homepage = "https://github.com/lost-rob0t/forgejo-chatgpt-plugin";
     license = lib.licenses.agpl3Only;
     mainProgram = "forgejo-chatgpt-plugin";
